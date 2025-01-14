@@ -10,15 +10,19 @@ import Firebase
 
 
 
+
 struct LoginView: View {
-   
-    @State var isLoginState = false
-    @State var email: String = ""
-    @State var password: String = ""
     
-    init() {
-        FirebaseApp.configure()
-    }
+    let didCompleteLoginProcess: () -> ()
+    
+    @State private var isLoginState = false
+    @State private var email: String = ""
+    @State private var password: String = ""
+    @State private var loginMessage: String = ""
+    @State private var isImagePickerPresented: Bool = false
+    @State private var selectedImage: UIImage?
+    
+
     
     var body: some View {
         NavigationView {
@@ -35,11 +39,49 @@ struct LoginView: View {
 
                     if !isLoginState {
                         Button {
-
-                        } label: {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 64))
-                                .padding()
+                            isImagePickerPresented.toggle()
+                        }
+                        label: {
+                            if let selectedImage {
+                                Image(uiImage: selectedImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .clipShape(
+                                        Circle()
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 4)
+                                    )
+                                    .shadow(
+                                        radius: 10
+                                    )
+                                    .frame(
+                                        width: 150,
+                                        height: 150
+                                    )
+                                    .padding()
+                            } else {
+                                Image(systemName: "person.fill")
+                                    .scaledToFit()
+                                    .clipShape(
+                                        Circle()
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white, lineWidth: 4)
+                                    )
+                                    .shadow(
+                                        radius: 10
+                                    )
+                                    .font(.system(size: 150))
+                                    .padding()
+                                    .foregroundStyle(Color(.label))
+                            }
+                            
+                        }
+                        .sheet(isPresented: $isImagePickerPresented) {
+                            ImagePicker(selectedImage: $selectedImage)
                         }
                     }
 
@@ -54,7 +96,7 @@ struct LoginView: View {
                     .background(.white)
 
                     Button {
-
+                        handleAction()
                     } label: {
                         HStack {
                             Spacer()
@@ -66,6 +108,8 @@ struct LoginView: View {
                         }.background(.blue)
 
                     }
+                    Text(self.loginMessage)
+                        .foregroundStyle(.red)
                 }
                 .padding()
 
@@ -76,8 +120,76 @@ struct LoginView: View {
         }
 
     }
+    private func handleAction() {
+        if isLoginState {
+            loginUser()
+        } else {
+            createNewAccount()
+        }
+    }
+    private func loginUser() {
+        FirebaseManager.shared.auth
+            .signIn(withEmail: email, password: password) { result, error in
+                if let error {
+                    self.loginMessage = "Error login user: \(error)"
+                    return
+                }
+                self.loginMessage = "Successfully logged in user \(self.email)"
+            }
+    }
+    private func createNewAccount() {
+        FirebaseManager.shared.auth
+            .createUser(withEmail: email, password: password) { result, error in
+                if let error {
+                    print("Error creating user: \(error)")
+                    self.loginMessage = "Error creating user: \(error)"
+                    return
+                }
+                print("Successfully created user \(result?.user.uid ?? "")")
+                self.loginMessage = "Successfully created user \(self.email)"
+                
+                storeUserInformation()
+            }
+    }
+    
+    private func storeUserInformation() {
+        guard let uid = FirebaseManager.shared.auth.currentUser?.uid else { return }
+        let userData = ["email": self.email, "uid": uid]
+        FirebaseManager.shared.firestore.collection("users")
+            .document(uid).setData(userData) { error in
+                if let error = error {
+                    print(error)
+                    self.loginMessage = "Failed to store user information \(error)"
+                    return
+                }
+            }
+    }
+    
+    private func persistImageToStorage() {
+       
+        guard let uid = FirebaseManager.shared.auth.currentUser?.uid else { return }
+        let ref = FirebaseManager.shared.storage.reference(withPath: uid)
+        guard let imageData = self.selectedImage?.jpegData(compressionQuality: 0.5) else { return }
+        ref.putData(imageData, metadata: nil) { metadate, error in
+            if let error = error {
+                self.loginMessage = "Failed to upload image \(error)"
+                return
+            }
+        }
+        ref.downloadURL() { url, error in
+            if let error = error {
+                self.loginMessage = "Failed to retrieve download url \(error)"
+                return
+            }
+            
+            self.loginMessage = "Successfully uploaded image to storage and retrieved download url \(url?.absoluteString ?? "")"
+        }
+       
+    }
 }
 
 #Preview {
-    LoginView()
+    LoginView(didCompleteLoginProcess: {
+        
+    })
 }
